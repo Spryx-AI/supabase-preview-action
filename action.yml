@@ -1,0 +1,46 @@
+name: 'Supabase Preview Action'
+description: 'Creates a Supabase preview branch and exposes credentials as reusable outputs'
+
+inputs:
+  supabase_access_token:
+    description: 'Supabase Management API access token'
+    required: true
+  project_ref:
+    description: 'Parent Supabase project reference ID'
+    required: true
+  git_branch_name:
+    description: 'Git branch name used to identify the preview branch (defaults to current GitHub ref)'
+    required: false
+    default: ''
+  branch_name:
+    description: 'Supabase branch name (defaults to git_branch_name)'
+    required: false
+    default: ''
+  timeout_seconds:
+    description: 'Timeout in seconds waiting for branch migrations to complete (default: 300)'
+    required: false
+    default: '300'
+  poll_interval_seconds:
+    description: 'Polling interval in seconds while waiting for branch (default: 10)'
+    required: false
+    default: '10'
+
+outputs:
+  project_ref:
+    description: 'Supabase project ref of the preview branch'
+  supabase_url:
+    description: 'Supabase API URL for the preview branch (https://<ref>.supabase.co)'
+  anon_key:
+    description: 'Supabase anonymous key for the preview branch'
+  service_role_key:
+    description: 'Supabase service role key for the preview branch'
+  db_host:
+    description: 'PostgreSQL host for the preview branch'
+  db_port:
+    description: 'PostgreSQL port for the preview branch'
+  db_name:
+    description: 'PostgreSQL database name for the preview branch'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
