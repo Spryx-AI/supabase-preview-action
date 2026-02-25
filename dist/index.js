@@ -31278,18 +31278,25 @@ async function run() {
         core.warning('anon key not found in API keys response');
     if (!serviceRoleKey)
         core.warning('service_role key not found in API keys response');
-    // 7. Construct remaining outputs
+    // 7. Fetch branch project region to build the pooler (IPv4) connection string
+    // Direct connections (db_host) are IPv6-only; the Supavisor pooler supports IPv4
+    const branchProject = await supabaseFetch('GET', `/v1/projects/${branchProjectRef}`, accessToken);
+    const poolerHost = `aws-0-${branchProject.region}.pooler.supabase.com`;
+    const poolerPort = '6543'; // transaction mode
+    const poolerUser = `postgres.${branchProjectRef}`;
+    // 8. Construct remaining outputs
     const supabaseUrl = `https://${branchProjectRef}.supabase.co`;
     const dbPortStr = String(dbPort || 5432);
     const dbName = 'postgres';
-    // 8. Mask secrets BEFORE any logging or output
+    const dbConnectionString = `postgresql://${poolerUser}:${dbPass}@${poolerHost}:${poolerPort}/${dbName}`;
+    // 9. Mask secrets BEFORE any logging or output
     if (anonKey)
         core.setSecret(anonKey);
     if (serviceRoleKey)
         core.setSecret(serviceRoleKey);
     if (dbPass)
         core.setSecret(dbPass);
-    // 9. Set GitHub Actions outputs
+    // 10. Set GitHub Actions outputs
     core.setOutput('project_ref', branchProjectRef);
     core.setOutput('supabase_url', supabaseUrl);
     core.setOutput('anon_key', anonKey);
@@ -31299,13 +31306,20 @@ async function run() {
     core.setOutput('db_name', dbName);
     core.setOutput('db_user', dbUser);
     core.setOutput('db_password', dbPass);
-    // 10. Also export as environment variables for convenient use in subsequent steps
+    core.setOutput('db_pooler_host', poolerHost);
+    core.setOutput('db_pooler_port', poolerPort);
+    core.setOutput('db_connection_string', dbConnectionString);
+    // 11. Also export as environment variables for convenient use in subsequent steps
     core.exportVariable('SUPABASE_URL', supabaseUrl);
     core.exportVariable('SUPABASE_ANON_KEY', anonKey);
     core.exportVariable('SUPABASE_SERVICE_ROLE_KEY', serviceRoleKey);
     core.exportVariable('PGPASSWORD', dbPass);
-    core.exportVariable('PGUSER', dbUser);
+    core.exportVariable('PGUSER', poolerUser);
+    core.exportVariable('PGHOST', poolerHost);
+    core.exportVariable('PGPORT', poolerPort);
+    core.exportVariable('DATABASE_URL', dbConnectionString);
     core.info(`Supabase preview branch ready: ${supabaseUrl}`);
+    core.info(`Pooler host (IPv4): ${poolerHost}`);
 }
 run().catch(error => {
     core.setFailed(error instanceof Error ? error.message : String(error));

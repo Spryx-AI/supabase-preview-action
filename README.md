@@ -21,13 +21,44 @@ GitHub Action that creates a [Supabase preview branch](https://supabase.com/docs
 | `supabase_url` | Supabase API URL (`https://<ref>.supabase.co`) |
 | `anon_key` | Anonymous API key (masked in logs) |
 | `service_role_key` | Service role key (masked in logs) |
-| `db_host` | PostgreSQL host |
-| `db_port` | PostgreSQL port |
+| `db_host` | PostgreSQL direct host (IPv6 — **not usable on GitHub Actions runners**) |
+| `db_port` | PostgreSQL direct port |
 | `db_name` | PostgreSQL database name |
+| `db_user` | PostgreSQL user |
+| `db_password` | PostgreSQL password (masked in logs) |
+| `db_pooler_host` | Supavisor pooler host — **IPv4 compatible, use this on GitHub Actions** |
+| `db_pooler_port` | Pooler port (`6543` transaction mode) |
+| `db_connection_string` | Full PostgreSQL connection string via the IPv4 pooler |
 
-The action also sets `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` as environment variables available to all subsequent steps in the job.
+The action also sets environment variables for all subsequent steps:
+
+| Env var | Value |
+|---------|-------|
+| `SUPABASE_URL` | `supabase_url` |
+| `SUPABASE_ANON_KEY` | `anon_key` |
+| `SUPABASE_SERVICE_ROLE_KEY` | `service_role_key` |
+| `DATABASE_URL` | `db_connection_string` (pooler, IPv4) |
+| `PGHOST` | `db_pooler_host` |
+| `PGPORT` | `db_pooler_port` |
+| `PGUSER` | `postgres.<project_ref>` |
+| `PGPASSWORD` | `db_password` |
+
+> **GitHub Actions IPv6 note:** Supabase preview branches are IPv6-only by default. The direct `db_host` (`db.<ref>.supabase.co`) will fail with "Network is unreachable" on GitHub-hosted runners. Always use `db_pooler_host` / `db_connection_string` or the `DATABASE_URL` / `PG*` env vars for database connections in CI.
 
 ## Usage
+
+### Connect to the database with psql
+
+```yaml
+- uses: Spryx-AI/supabase-preview-action@v1
+  with:
+    supabase_access_token: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+    project_ref: ${{ vars.SUPABASE_PROJECT_REF }}
+
+- name: Run database migration
+  # DATABASE_URL is set automatically — uses the IPv4 pooler
+  run: psql "$DATABASE_URL" -c "SELECT 1"
+```
 
 ### Basic — create preview branch on pull requests
 
