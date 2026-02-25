@@ -234,15 +234,14 @@ async function run(): Promise<void> {
   core.setOutput('db_pooler_port', poolerPort)
   core.setOutput('db_connection_string', dbConnectionString)
 
-  // 11. Also export as environment variables for convenient use in subsequent steps
+  // 11. Export non-sensitive env vars for convenient use in subsequent steps.
+  // Sensitive credentials (SUPABASE_SERVICE_ROLE_KEY, PGPASSWORD) are intentionally
+  // NOT exported globally — pass them via step-level `env:` from the action outputs.
   core.exportVariable('SUPABASE_URL', supabaseUrl)
   core.exportVariable('SUPABASE_ANON_KEY', anonKey)
-  core.exportVariable('SUPABASE_SERVICE_ROLE_KEY', serviceRoleKey)
-  core.exportVariable('PGPASSWORD', dbPass)
   core.exportVariable('PGUSER', poolerUser)
   core.exportVariable('PGHOST', poolerHost)
   core.exportVariable('PGPORT', poolerPort)
-  core.exportVariable('DATABASE_URL', dbConnectionString)
 
   core.info(`Supabase preview branch ready: ${supabaseUrl}`)
   core.info(`Pooler host (IPv4): ${poolerHost}`)
