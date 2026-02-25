@@ -25,6 +25,8 @@ interface BranchReadyDetails {
   ref: string
   db_host: string
   db_port: number
+  db_pass: string
+  db_user: string
 }
 
 function sleep(ms: number): Promise<void> {
@@ -74,6 +76,8 @@ async function waitForBranch(
         ref: details.ref,
         db_host: details.db_host,
         db_port: details.db_port,
+        db_pass: details.db_pass ?? '',
+        db_user: details.db_user ?? 'postgres',
       }
     }
 
@@ -143,6 +147,8 @@ async function run(): Promise<void> {
   let branchProjectRef: string
   let dbHost: string
   let dbPort: number
+  let dbPass: string
+  let dbUser: string
 
   if (existing) {
     core.info(`Found existing preview branch: ${existing.id}`)
@@ -153,6 +159,8 @@ async function run(): Promise<void> {
     branchProjectRef = ready.ref
     dbHost = ready.db_host
     dbPort = ready.db_port
+    dbPass = ready.db_pass
+    dbUser = ready.db_user
   } else {
     // 5. Create new preview branch
     core.info(`Creating Supabase preview branch: ${branchName}`)
@@ -170,6 +178,8 @@ async function run(): Promise<void> {
     branchProjectRef = ready.ref
     dbHost = ready.db_host
     dbPort = ready.db_port
+    dbPass = ready.db_pass
+    dbUser = ready.db_user
   }
 
   core.info(`Preview branch is active. Project ref: ${branchProjectRef}`)
@@ -191,6 +201,7 @@ async function run(): Promise<void> {
   // 8. Mask secrets BEFORE any logging or output
   if (anonKey) core.setSecret(anonKey)
   if (serviceRoleKey) core.setSecret(serviceRoleKey)
+  if (dbPass) core.setSecret(dbPass)
 
   // 9. Set GitHub Actions outputs
   core.setOutput('project_ref', branchProjectRef)
@@ -200,11 +211,15 @@ async function run(): Promise<void> {
   core.setOutput('db_host', dbHost)
   core.setOutput('db_port', dbPortStr)
   core.setOutput('db_name', dbName)
+  core.setOutput('db_user', dbUser)
+  core.setOutput('db_password', dbPass)
 
   // 10. Also export as environment variables for convenient use in subsequent steps
   core.exportVariable('SUPABASE_URL', supabaseUrl)
   core.exportVariable('SUPABASE_ANON_KEY', anonKey)
   core.exportVariable('SUPABASE_SERVICE_ROLE_KEY', serviceRoleKey)
+  core.exportVariable('PGPASSWORD', dbPass)
+  core.exportVariable('PGUSER', dbUser)
 
   core.info(`Supabase preview branch ready: ${supabaseUrl}`)
 }

@@ -31188,6 +31188,8 @@ async function waitForBranch(client, branchId, timeoutMs, pollMs) {
                 ref: details.ref,
                 db_host: details.db_host,
                 db_port: details.db_port,
+                db_pass: details.db_pass ?? '',
+                db_user: details.db_user ?? 'postgres',
             };
         }
         if (FAILED_STATUSES.includes(details.status)) {
@@ -31239,6 +31241,8 @@ async function run() {
     let branchProjectRef;
     let dbHost;
     let dbPort;
+    let dbPass;
+    let dbUser;
     if (existing) {
         core.info(`Found existing preview branch: ${existing.id}`);
         branchId = existing.id;
@@ -31248,6 +31252,8 @@ async function run() {
         branchProjectRef = ready.ref;
         dbHost = ready.db_host;
         dbPort = ready.db_port;
+        dbPass = ready.db_pass;
+        dbUser = ready.db_user;
     }
     else {
         // 5. Create new preview branch
@@ -31260,6 +31266,8 @@ async function run() {
         branchProjectRef = ready.ref;
         dbHost = ready.db_host;
         dbPort = ready.db_port;
+        dbPass = ready.db_pass;
+        dbUser = ready.db_user;
     }
     core.info(`Preview branch is active. Project ref: ${branchProjectRef}`);
     // 6. Fetch API keys for the preview branch
@@ -31279,6 +31287,8 @@ async function run() {
         core.setSecret(anonKey);
     if (serviceRoleKey)
         core.setSecret(serviceRoleKey);
+    if (dbPass)
+        core.setSecret(dbPass);
     // 9. Set GitHub Actions outputs
     core.setOutput('project_ref', branchProjectRef);
     core.setOutput('supabase_url', supabaseUrl);
@@ -31287,10 +31297,14 @@ async function run() {
     core.setOutput('db_host', dbHost);
     core.setOutput('db_port', dbPortStr);
     core.setOutput('db_name', dbName);
+    core.setOutput('db_user', dbUser);
+    core.setOutput('db_password', dbPass);
     // 10. Also export as environment variables for convenient use in subsequent steps
     core.exportVariable('SUPABASE_URL', supabaseUrl);
     core.exportVariable('SUPABASE_ANON_KEY', anonKey);
     core.exportVariable('SUPABASE_SERVICE_ROLE_KEY', serviceRoleKey);
+    core.exportVariable('PGPASSWORD', dbPass);
+    core.exportVariable('PGUSER', dbUser);
     core.info(`Supabase preview branch ready: ${supabaseUrl}`);
 }
 run().catch(error => {
