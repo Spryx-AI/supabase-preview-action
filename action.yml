@@ -47,7 +47,7 @@ outputs:
   db_pooler_host:
     description: 'Supavisor pooler host — supports IPv4, use this on GitHub Actions runners'
   db_pooler_port:
-    description: 'Supavisor pooler port (6543 transaction mode)'
+    description: 'Supavisor pooler port (5432 session mode)'
   db_connection_string:
     description: 'Full PostgreSQL connection string via the IPv4-compatible pooler'
 

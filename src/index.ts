@@ -207,7 +207,7 @@ async function run(): Promise<void> {
     accessToken
   )
   const poolerHost = `aws-0-${parentProject.region}.pooler.supabase.com`
-  const poolerPort = '6543' // transaction mode
+  const poolerPort = '5432' // session mode — supports full SQL (migrations, psql, advisory locks)
   const poolerUser = `postgres.${branchProjectRef}`
 
   // 8. Construct remaining outputs

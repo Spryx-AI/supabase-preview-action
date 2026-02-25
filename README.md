@@ -27,7 +27,7 @@ GitHub Action that creates a [Supabase preview branch](https://supabase.com/docs
 | `db_user` | PostgreSQL user |
 | `db_password` | PostgreSQL password (masked in logs) |
 | `db_pooler_host` | Supavisor pooler host — **IPv4 compatible, use this on GitHub Actions** |
-| `db_pooler_port` | Pooler port (`6543` transaction mode) |
+| `db_pooler_port` | Pooler port (`5432` session mode) |
 | `db_connection_string` | Full PostgreSQL connection string via the IPv4 pooler |
 
 The action sets these **non-sensitive** environment variables for all subsequent steps:
