@@ -31278,10 +31278,11 @@ async function run() {
         core.warning('anon key not found in API keys response');
     if (!serviceRoleKey)
         core.warning('service_role key not found in API keys response');
-    // 7. Fetch branch project region to build the pooler (IPv4) connection string
-    // Direct connections (db_host) are IPv6-only; the Supavisor pooler supports IPv4
-    const branchProject = await supabaseFetch('GET', `/v1/projects/${branchProjectRef}`, accessToken);
-    const poolerHost = `aws-0-${branchProject.region}.pooler.supabase.com`;
+    // 7. Fetch parent project region to build the pooler (IPv4) connection string.
+    // Preview branches are sub-projects and return 404 on GET /v1/projects/{ref};
+    // the parent project is always in the same region as its branches.
+    const parentProject = await supabaseFetch('GET', `/v1/projects/${parentRef}`, accessToken);
+    const poolerHost = `aws-0-${parentProject.region}.pooler.supabase.com`;
     const poolerPort = '6543'; // transaction mode
     const poolerUser = `postgres.${branchProjectRef}`;
     // 8. Construct remaining outputs
