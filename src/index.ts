@@ -7,6 +7,11 @@ const READY_STATUS = 'ACTIVE_HEALTHY'
 const FAILED_STATUSES = ['INIT_FAILED', 'REMOVED', 'GOING_DOWN']
 
 // These endpoints are not exposed as SDK class methods, so we call them directly
+interface ProjectDetails {
+  id: string
+  region: string
+}
+
 interface BranchListItem {
   id: string
   name: string
@@ -25,6 +30,8 @@ interface BranchReadyDetails {
   ref: string
   db_host: string
   db_port: number
+  db_pass: string
+  db_user: string
 }
 
 function sleep(ms: number): Promise<void> {
@@ -74,6 +81,8 @@ async function waitForBranch(
         ref: details.ref,
         db_host: details.db_host,
         db_port: details.db_port,
+        db_pass: details.db_pass ?? '',
+        db_user: details.db_user ?? 'postgres',
       }
     }
 
@@ -143,6 +152,8 @@ async function run(): Promise<void> {
   let branchProjectRef: string
   let dbHost: string
   let dbPort: number
+  let dbPass: string
+  let dbUser: string
 
   if (existing) {
     core.info(`Found existing preview branch: ${existing.id}`)
@@ -153,6 +164,8 @@ async function run(): Promise<void> {
     branchProjectRef = ready.ref
     dbHost = ready.db_host
     dbPort = ready.db_port
+    dbPass = ready.db_pass
+    dbUser = ready.db_user
   } else {
     // 5. Create new preview branch
     core.info(`Creating Supabase preview branch: ${branchName}`)
@@ -170,6 +183,8 @@ async function run(): Promise<void> {
     branchProjectRef = ready.ref
     dbHost = ready.db_host
     dbPort = ready.db_port
+    dbPass = ready.db_pass
+    dbUser = ready.db_user
   }
 
   core.info(`Preview branch is active. Project ref: ${branchProjectRef}`)
@@ -183,16 +198,29 @@ async function run(): Promise<void> {
   if (!anonKey) core.warning('anon key not found in API keys response')
   if (!serviceRoleKey) core.warning('service_role key not found in API keys response')
 
-  // 7. Construct remaining outputs
+  // 7. Fetch branch project region to build the pooler (IPv4) connection string
+  // Direct connections (db_host) are IPv6-only; the Supavisor pooler supports IPv4
+  const branchProject = await supabaseFetch<ProjectDetails>(
+    'GET',
+    `/v1/projects/${branchProjectRef}`,
+    accessToken
+  )
+  const poolerHost = `aws-0-${branchProject.region}.pooler.supabase.com`
+  const poolerPort = '6543' // transaction mode
+  const poolerUser = `postgres.${branchProjectRef}`
+
+  // 8. Construct remaining outputs
   const supabaseUrl = `https://${branchProjectRef}.supabase.co`
   const dbPortStr = String(dbPort || 5432)
   const dbName = 'postgres'
+  const dbConnectionString = `postgresql://${poolerUser}:${dbPass}@${poolerHost}:${poolerPort}/${dbName}`
 
-  // 8. Mask secrets BEFORE any logging or output
+  // 9. Mask secrets BEFORE any logging or output
   if (anonKey) core.setSecret(anonKey)
   if (serviceRoleKey) core.setSecret(serviceRoleKey)
+  if (dbPass) core.setSecret(dbPass)
 
-  // 9. Set GitHub Actions outputs
+  // 10. Set GitHub Actions outputs
   core.setOutput('project_ref', branchProjectRef)
   core.setOutput('supabase_url', supabaseUrl)
   core.setOutput('anon_key', anonKey)
@@ -200,13 +228,23 @@ async function run(): Promise<void> {
   core.setOutput('db_host', dbHost)
   core.setOutput('db_port', dbPortStr)
   core.setOutput('db_name', dbName)
+  core.setOutput('db_user', dbUser)
+  core.setOutput('db_password', dbPass)
+  core.setOutput('db_pooler_host', poolerHost)
+  core.setOutput('db_pooler_port', poolerPort)
+  core.setOutput('db_connection_string', dbConnectionString)
 
-  // 10. Also export as environment variables for convenient use in subsequent steps
+  // 11. Export non-sensitive env vars for convenient use in subsequent steps.
+  // Sensitive credentials (SUPABASE_SERVICE_ROLE_KEY, PGPASSWORD) are intentionally
+  // NOT exported globally — pass them via step-level `env:` from the action outputs.
   core.exportVariable('SUPABASE_URL', supabaseUrl)
   core.exportVariable('SUPABASE_ANON_KEY', anonKey)
-  core.exportVariable('SUPABASE_SERVICE_ROLE_KEY', serviceRoleKey)
+  core.exportVariable('PGUSER', poolerUser)
+  core.exportVariable('PGHOST', poolerHost)
+  core.exportVariable('PGPORT', poolerPort)
 
   core.info(`Supabase preview branch ready: ${supabaseUrl}`)
+  core.info(`Pooler host (IPv4): ${poolerHost}`)
 }
 
 run().catch(error => {

@@ -31188,6 +31188,8 @@ async function waitForBranch(client, branchId, timeoutMs, pollMs) {
                 ref: details.ref,
                 db_host: details.db_host,
                 db_port: details.db_port,
+                db_pass: details.db_pass ?? '',
+                db_user: details.db_user ?? 'postgres',
             };
         }
         if (FAILED_STATUSES.includes(details.status)) {
@@ -31239,6 +31241,8 @@ async function run() {
     let branchProjectRef;
     let dbHost;
     let dbPort;
+    let dbPass;
+    let dbUser;
     if (existing) {
         core.info(`Found existing preview branch: ${existing.id}`);
         branchId = existing.id;
@@ -31248,6 +31252,8 @@ async function run() {
         branchProjectRef = ready.ref;
         dbHost = ready.db_host;
         dbPort = ready.db_port;
+        dbPass = ready.db_pass;
+        dbUser = ready.db_user;
     }
     else {
         // 5. Create new preview branch
@@ -31260,6 +31266,8 @@ async function run() {
         branchProjectRef = ready.ref;
         dbHost = ready.db_host;
         dbPort = ready.db_port;
+        dbPass = ready.db_pass;
+        dbUser = ready.db_user;
     }
     core.info(`Preview branch is active. Project ref: ${branchProjectRef}`);
     // 6. Fetch API keys for the preview branch
@@ -31270,16 +31278,25 @@ async function run() {
         core.warning('anon key not found in API keys response');
     if (!serviceRoleKey)
         core.warning('service_role key not found in API keys response');
-    // 7. Construct remaining outputs
+    // 7. Fetch branch project region to build the pooler (IPv4) connection string
+    // Direct connections (db_host) are IPv6-only; the Supavisor pooler supports IPv4
+    const branchProject = await supabaseFetch('GET', `/v1/projects/${branchProjectRef}`, accessToken);
+    const poolerHost = `aws-0-${branchProject.region}.pooler.supabase.com`;
+    const poolerPort = '6543'; // transaction mode
+    const poolerUser = `postgres.${branchProjectRef}`;
+    // 8. Construct remaining outputs
     const supabaseUrl = `https://${branchProjectRef}.supabase.co`;
     const dbPortStr = String(dbPort || 5432);
     const dbName = 'postgres';
-    // 8. Mask secrets BEFORE any logging or output
+    const dbConnectionString = `postgresql://${poolerUser}:${dbPass}@${poolerHost}:${poolerPort}/${dbName}`;
+    // 9. Mask secrets BEFORE any logging or output
     if (anonKey)
         core.setSecret(anonKey);
     if (serviceRoleKey)
         core.setSecret(serviceRoleKey);
-    // 9. Set GitHub Actions outputs
+    if (dbPass)
+        core.setSecret(dbPass);
+    // 10. Set GitHub Actions outputs
     core.setOutput('project_ref', branchProjectRef);
     core.setOutput('supabase_url', supabaseUrl);
     core.setOutput('anon_key', anonKey);
@@ -31287,11 +31304,21 @@ async function run() {
     core.setOutput('db_host', dbHost);
     core.setOutput('db_port', dbPortStr);
     core.setOutput('db_name', dbName);
-    // 10. Also export as environment variables for convenient use in subsequent steps
+    core.setOutput('db_user', dbUser);
+    core.setOutput('db_password', dbPass);
+    core.setOutput('db_pooler_host', poolerHost);
+    core.setOutput('db_pooler_port', poolerPort);
+    core.setOutput('db_connection_string', dbConnectionString);
+    // 11. Export non-sensitive env vars for convenient use in subsequent steps.
+    // Sensitive credentials (SUPABASE_SERVICE_ROLE_KEY, PGPASSWORD) are intentionally
+    // NOT exported globally — pass them via step-level `env:` from the action outputs.
     core.exportVariable('SUPABASE_URL', supabaseUrl);
     core.exportVariable('SUPABASE_ANON_KEY', anonKey);
-    core.exportVariable('SUPABASE_SERVICE_ROLE_KEY', serviceRoleKey);
+    core.exportVariable('PGUSER', poolerUser);
+    core.exportVariable('PGHOST', poolerHost);
+    core.exportVariable('PGPORT', poolerPort);
     core.info(`Supabase preview branch ready: ${supabaseUrl}`);
+    core.info(`Pooler host (IPv4): ${poolerHost}`);
 }
 run().catch(error => {
     core.setFailed(error instanceof Error ? error.message : String(error));

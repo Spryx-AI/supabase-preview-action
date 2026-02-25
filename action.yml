@@ -40,6 +40,16 @@ outputs:
     description: 'PostgreSQL port for the preview branch'
   db_name:
     description: 'PostgreSQL database name for the preview branch'
+  db_user:
+    description: 'PostgreSQL user for the preview branch'
+  db_password:
+    description: 'PostgreSQL password for the preview branch (masked in logs)'
+  db_pooler_host:
+    description: 'Supavisor pooler host — supports IPv4, use this on GitHub Actions runners'
+  db_pooler_port:
+    description: 'Supavisor pooler port (6543 transaction mode)'
+  db_connection_string:
+    description: 'Full PostgreSQL connection string via the IPv4-compatible pooler'
 
 runs:
   using: 'node20'
