@@ -31282,7 +31282,7 @@ async function run() {
     // Preview branches are sub-projects and return 404 on GET /v1/projects/{ref};
     // the parent project is always in the same region as its branches.
     const parentProject = await supabaseFetch('GET', `/v1/projects/${parentRef}`, accessToken);
-    const poolerHost = `aws-0-${parentProject.region}.pooler.supabase.com`;
+    const poolerHost = `aws-1-${parentProject.region}.pooler.supabase.com`;
     const poolerPort = '5432'; // session mode — supports full SQL (migrations, psql, advisory locks)
     const poolerUser = `postgres.${branchProjectRef}`;
     // 8. Construct remaining outputs
