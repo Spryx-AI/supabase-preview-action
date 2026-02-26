@@ -1,10 +1,14 @@
 import * as core from '@actions/core'
 import * as github from '@actions/github'
 import { SupabaseManagementAPI } from 'supabase-management-js'
+import { execFileSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 const SUPABASE_API_BASE = 'https://api.supabase.com'
 const READY_STATUS = 'ACTIVE_HEALTHY'
 const FAILED_STATUSES = ['INIT_FAILED', 'REMOVED', 'GOING_DOWN']
+const REQUEST_TIMEOUT_MS = 30_000
 
 // These endpoints are not exposed as SDK class methods, so we call them directly
 interface ProjectDetails {
@@ -34,6 +38,87 @@ interface BranchReadyDetails {
   db_user: string
 }
 
+class RequestTimeoutError extends Error {
+  constructor(label: string, ms: number) {
+    super(`${label} timed out after ${ms}ms`)
+    this.name = 'RequestTimeoutError'
+  }
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'name' in error &&
+    (error as { name?: unknown }).name === 'AbortError'
+  )
+}
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new RequestTimeoutError(label, ms)), ms)
+  })
+
+  try {
+    return await Promise.race([promise, timeoutPromise])
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId)
+  }
+}
+
+function getBooleanInput(name: string): boolean {
+  const raw = (core.getInput(name) || '').trim().toLowerCase()
+  if (!raw) return false
+  if (['true', '1', 'yes', 'y', 'on'].includes(raw)) return true
+  if (['false', '0', 'no', 'n', 'off'].includes(raw)) return false
+  throw new Error(`Invalid boolean value for input \`${name}\`: ${raw}`)
+}
+
+function buildEncodedDbConnectionString(
+  user: string,
+  password: string,
+  host: string,
+  port: string,
+  dbName: string
+): string {
+  return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${dbName}`
+}
+
+function runSupabaseCliMigrations(
+  workdir: string,
+  cliVersion: string,
+  dbConnectionString: string
+): void {
+  const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx'
+  const cliPackage = `supabase@${cliVersion || 'latest'}`
+  const args = [
+    '--yes',
+    cliPackage,
+    '--workdir',
+    workdir,
+    '--yes',
+    'migration',
+    'up',
+    '--db-url',
+    dbConnectionString,
+  ]
+
+  core.info(`Applying local Supabase migrations via CLI (${cliPackage})...`)
+  core.info(`Supabase CLI workdir: ${workdir}`)
+
+  try {
+    execFileSync(npxCmd, args, { stdio: 'inherit' })
+  } catch (error) {
+    throw new Error(
+      `Supabase CLI failed while applying local migrations. ` +
+        `Ensure the repository is checked out and contains a valid supabase project. ` +
+        `Original error: ${error instanceof Error ? error.message : String(error)}`
+    )
+  }
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
@@ -44,14 +129,28 @@ async function supabaseFetch<T>(
   accessToken: string,
   body?: unknown
 ): Promise<T> {
-  const response = await fetch(`${SUPABASE_API_BASE}${path}`, {
-    method,
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  })
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+
+  let response: Response
+  try {
+    response = await fetch(`${SUPABASE_API_BASE}${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    })
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new RequestTimeoutError(`Supabase Management API ${method} ${path}`, REQUEST_TIMEOUT_MS)
+    }
+    throw error
+  } finally {
+    clearTimeout(timeoutId)
+  }
 
   if (!response.ok) {
     const text = await response.text()
@@ -70,7 +169,21 @@ async function waitForBranch(
   const deadline = Date.now() + timeoutMs
 
   while (Date.now() < deadline) {
-    const details = await client.getBranchDetails(branchId)
+    let details
+    try {
+      details = await withTimeout(
+        client.getBranchDetails(branchId),
+        REQUEST_TIMEOUT_MS,
+        `getBranchDetails(${branchId})`
+      )
+    } catch (error) {
+      if (error instanceof RequestTimeoutError) {
+        core.warning(`${error.message} — polling again in ${pollMs / 1000}s...`)
+        await sleep(pollMs)
+        continue
+      }
+      throw error
+    }
 
     if (!details) {
       throw new Error(`Branch ${branchId} not found`)
@@ -103,6 +216,9 @@ async function run(): Promise<void> {
   const parentRef = core.getInput('project_ref', { required: true })
   const timeoutSeconds = parseInt(core.getInput('timeout_seconds') || '300', 10)
   const pollIntervalSeconds = parseInt(core.getInput('poll_interval_seconds') || '10', 10)
+  const applyLocalMigrations = getBooleanInput('apply_local_migrations')
+  const supabaseWorkdir = core.getInput('supabase_workdir') || '.'
+  const supabaseCliVersion = core.getInput('supabase_cli_version') || 'latest'
   const timeoutMs = timeoutSeconds * 1000
   const pollMs = pollIntervalSeconds * 1000
 
@@ -190,7 +306,11 @@ async function run(): Promise<void> {
   core.info(`Preview branch is active. Project ref: ${branchProjectRef}`)
 
   // 6. Fetch API keys for the preview branch
-  const apiKeys = await client.getProjectApiKeys(branchProjectRef)
+  const apiKeys = await withTimeout(
+    client.getProjectApiKeys(branchProjectRef),
+    REQUEST_TIMEOUT_MS,
+    `getProjectApiKeys(${branchProjectRef})`
+  )
 
   const anonKey = apiKeys?.find(k => k.name === 'anon')?.api_key ?? ''
   const serviceRoleKey = apiKeys?.find(k => k.name === 'service_role')?.api_key ?? ''
@@ -215,13 +335,50 @@ async function run(): Promise<void> {
   const dbPortStr = String(dbPort || 5432)
   const dbName = 'postgres'
   const dbConnectionString = `postgresql://${poolerUser}:${dbPass}@${poolerHost}:${poolerPort}/${dbName}`
+  const encodedDbConnectionString = buildEncodedDbConnectionString(
+    poolerUser,
+    dbPass,
+    poolerHost,
+    poolerPort,
+    dbName
+  )
 
   // 9. Mask secrets BEFORE any logging or output
   if (anonKey) core.setSecret(anonKey)
   if (serviceRoleKey) core.setSecret(serviceRoleKey)
   if (dbPass) core.setSecret(dbPass)
+  if (dbPass) core.setSecret(encodeURIComponent(dbPass))
 
-  // 10. Set GitHub Actions outputs
+  // 10. Optionally apply local repository migrations via Supabase CLI.
+  // This requires `actions/checkout` and a `supabase/` directory in the workspace.
+  if (applyLocalMigrations) {
+    if (!dbPass) {
+      throw new Error(
+        'Cannot apply local migrations because `db_password` is empty in the preview branch details.'
+      )
+    }
+
+    const resolvedWorkdir = resolve(supabaseWorkdir)
+    const supabaseDir = resolve(resolvedWorkdir, 'supabase')
+    const migrationsDir = resolve(supabaseDir, 'migrations')
+
+    if (!existsSync(supabaseDir)) {
+      throw new Error(
+        `apply_local_migrations=true but no \`supabase/\` directory was found at: ${supabaseDir}. ` +
+          `Run \`actions/checkout\` before this action and set \`supabase_workdir\` if needed.`
+      )
+    }
+
+    if (!existsSync(migrationsDir)) {
+      throw new Error(
+        `apply_local_migrations=true but no migrations directory was found at: ${migrationsDir}`
+      )
+    }
+
+    runSupabaseCliMigrations(resolvedWorkdir, supabaseCliVersion, encodedDbConnectionString)
+  }
+
+  // 11. Set GitHub Actions outputs
   core.setOutput('project_ref', branchProjectRef)
   core.setOutput('supabase_url', supabaseUrl)
   core.setOutput('anon_key', anonKey)
@@ -235,7 +392,7 @@ async function run(): Promise<void> {
   core.setOutput('db_pooler_port', poolerPort)
   core.setOutput('db_connection_string', dbConnectionString)
 
-  // 11. Export non-sensitive env vars for convenient use in subsequent steps.
+  // 12. Export non-sensitive env vars for convenient use in subsequent steps.
   // Sensitive credentials (SUPABASE_SERVICE_ROLE_KEY, PGPASSWORD) are intentionally
   // NOT exported globally — pass them via step-level `env:` from the action outputs.
   core.exportVariable('SUPABASE_URL', supabaseUrl)

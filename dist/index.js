@@ -31155,21 +31155,103 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 const core = __importStar(__nccwpck_require__(7484));
 const github = __importStar(__nccwpck_require__(3228));
 const supabase_management_js_1 = __nccwpck_require__(5507);
+const node_child_process_1 = __nccwpck_require__(1421);
+const node_fs_1 = __nccwpck_require__(3024);
+const node_path_1 = __nccwpck_require__(6760);
 const SUPABASE_API_BASE = 'https://api.supabase.com';
 const READY_STATUS = 'ACTIVE_HEALTHY';
 const FAILED_STATUSES = ['INIT_FAILED', 'REMOVED', 'GOING_DOWN'];
+const REQUEST_TIMEOUT_MS = 30000;
+class RequestTimeoutError extends Error {
+    constructor(label, ms) {
+        super(`${label} timed out after ${ms}ms`);
+        this.name = 'RequestTimeoutError';
+    }
+}
+function isAbortError(error) {
+    return (typeof error === 'object' &&
+        error !== null &&
+        'name' in error &&
+        error.name === 'AbortError');
+}
+async function withTimeout(promise, ms, label) {
+    let timeoutId;
+    const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new RequestTimeoutError(label, ms)), ms);
+    });
+    try {
+        return await Promise.race([promise, timeoutPromise]);
+    }
+    finally {
+        if (timeoutId)
+            clearTimeout(timeoutId);
+    }
+}
+function getBooleanInput(name) {
+    const raw = (core.getInput(name) || '').trim().toLowerCase();
+    if (!raw)
+        return false;
+    if (['true', '1', 'yes', 'y', 'on'].includes(raw))
+        return true;
+    if (['false', '0', 'no', 'n', 'off'].includes(raw))
+        return false;
+    throw new Error(`Invalid boolean value for input \`${name}\`: ${raw}`);
+}
+function buildEncodedDbConnectionString(user, password, host, port, dbName) {
+    return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${dbName}`;
+}
+function runSupabaseCliMigrations(workdir, cliVersion, dbConnectionString) {
+    const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+    const cliPackage = `supabase@${cliVersion || 'latest'}`;
+    const args = [
+        '--yes',
+        cliPackage,
+        '--workdir',
+        workdir,
+        '--yes',
+        'migration',
+        'up',
+        '--db-url',
+        dbConnectionString,
+    ];
+    core.info(`Applying local Supabase migrations via CLI (${cliPackage})...`);
+    core.info(`Supabase CLI workdir: ${workdir}`);
+    try {
+        (0, node_child_process_1.execFileSync)(npxCmd, args, { stdio: 'inherit' });
+    }
+    catch (error) {
+        throw new Error(`Supabase CLI failed while applying local migrations. ` +
+            `Ensure the repository is checked out and contains a valid supabase project. ` +
+            `Original error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+}
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 async function supabaseFetch(method, path, accessToken, body) {
-    const response = await fetch(`${SUPABASE_API_BASE}${path}`, {
-        method,
-        headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-        },
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    let response;
+    try {
+        response = await fetch(`${SUPABASE_API_BASE}${path}`, {
+            method,
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+            },
+            body: body !== undefined ? JSON.stringify(body) : undefined,
+            signal: controller.signal,
+        });
+    }
+    catch (error) {
+        if (isAbortError(error)) {
+            throw new RequestTimeoutError(`Supabase Management API ${method} ${path}`, REQUEST_TIMEOUT_MS);
+        }
+        throw error;
+    }
+    finally {
+        clearTimeout(timeoutId);
+    }
     if (!response.ok) {
         const text = await response.text();
         throw new Error(`Supabase Management API ${response.status}: ${text}`);
@@ -31179,7 +31261,18 @@ async function supabaseFetch(method, path, accessToken, body) {
 async function waitForBranch(client, branchId, timeoutMs, pollMs) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-        const details = await client.getBranchDetails(branchId);
+        let details;
+        try {
+            details = await withTimeout(client.getBranchDetails(branchId), REQUEST_TIMEOUT_MS, `getBranchDetails(${branchId})`);
+        }
+        catch (error) {
+            if (error instanceof RequestTimeoutError) {
+                core.warning(`${error.message} — polling again in ${pollMs / 1000}s...`);
+                await sleep(pollMs);
+                continue;
+            }
+            throw error;
+        }
         if (!details) {
             throw new Error(`Branch ${branchId} not found`);
         }
@@ -31206,6 +31299,9 @@ async function run() {
     const parentRef = core.getInput('project_ref', { required: true });
     const timeoutSeconds = parseInt(core.getInput('timeout_seconds') || '300', 10);
     const pollIntervalSeconds = parseInt(core.getInput('poll_interval_seconds') || '10', 10);
+    const applyLocalMigrations = getBooleanInput('apply_local_migrations');
+    const supabaseWorkdir = core.getInput('supabase_workdir') || '.';
+    const supabaseCliVersion = core.getInput('supabase_cli_version') || 'latest';
     const timeoutMs = timeoutSeconds * 1000;
     const pollMs = pollIntervalSeconds * 1000;
     // 2. Resolve git branch name: explicit input → GitHub Actions context → error
@@ -31271,7 +31367,7 @@ async function run() {
     }
     core.info(`Preview branch is active. Project ref: ${branchProjectRef}`);
     // 6. Fetch API keys for the preview branch
-    const apiKeys = await client.getProjectApiKeys(branchProjectRef);
+    const apiKeys = await withTimeout(client.getProjectApiKeys(branchProjectRef), REQUEST_TIMEOUT_MS, `getProjectApiKeys(${branchProjectRef})`);
     const anonKey = apiKeys?.find(k => k.name === 'anon')?.api_key ?? '';
     const serviceRoleKey = apiKeys?.find(k => k.name === 'service_role')?.api_key ?? '';
     if (!anonKey)
@@ -31290,6 +31386,7 @@ async function run() {
     const dbPortStr = String(dbPort || 5432);
     const dbName = 'postgres';
     const dbConnectionString = `postgresql://${poolerUser}:${dbPass}@${poolerHost}:${poolerPort}/${dbName}`;
+    const encodedDbConnectionString = buildEncodedDbConnectionString(poolerUser, dbPass, poolerHost, poolerPort, dbName);
     // 9. Mask secrets BEFORE any logging or output
     if (anonKey)
         core.setSecret(anonKey);
@@ -31297,7 +31394,27 @@ async function run() {
         core.setSecret(serviceRoleKey);
     if (dbPass)
         core.setSecret(dbPass);
-    // 10. Set GitHub Actions outputs
+    if (dbPass)
+        core.setSecret(encodeURIComponent(dbPass));
+    // 10. Optionally apply local repository migrations via Supabase CLI.
+    // This requires `actions/checkout` and a `supabase/` directory in the workspace.
+    if (applyLocalMigrations) {
+        if (!dbPass) {
+            throw new Error('Cannot apply local migrations because `db_password` is empty in the preview branch details.');
+        }
+        const resolvedWorkdir = (0, node_path_1.resolve)(supabaseWorkdir);
+        const supabaseDir = (0, node_path_1.resolve)(resolvedWorkdir, 'supabase');
+        const migrationsDir = (0, node_path_1.resolve)(supabaseDir, 'migrations');
+        if (!(0, node_fs_1.existsSync)(supabaseDir)) {
+            throw new Error(`apply_local_migrations=true but no \`supabase/\` directory was found at: ${supabaseDir}. ` +
+                `Run \`actions/checkout\` before this action and set \`supabase_workdir\` if needed.`);
+        }
+        if (!(0, node_fs_1.existsSync)(migrationsDir)) {
+            throw new Error(`apply_local_migrations=true but no migrations directory was found at: ${migrationsDir}`);
+        }
+        runSupabaseCliMigrations(resolvedWorkdir, supabaseCliVersion, encodedDbConnectionString);
+    }
+    // 11. Set GitHub Actions outputs
     core.setOutput('project_ref', branchProjectRef);
     core.setOutput('supabase_url', supabaseUrl);
     core.setOutput('anon_key', anonKey);
@@ -31310,7 +31427,7 @@ async function run() {
     core.setOutput('db_pooler_host', poolerHost);
     core.setOutput('db_pooler_port', poolerPort);
     core.setOutput('db_connection_string', dbConnectionString);
-    // 11. Export non-sensitive env vars for convenient use in subsequent steps.
+    // 12. Export non-sensitive env vars for convenient use in subsequent steps.
     // Sensitive credentials (SUPABASE_SERVICE_ROLE_KEY, PGPASSWORD) are intentionally
     // NOT exported globally — pass them via step-level `env:` from the action outputs.
     core.exportVariable('SUPABASE_URL', supabaseUrl);
@@ -31432,6 +31549,14 @@ module.exports = require("net");
 
 /***/ }),
 
+/***/ 1421:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("node:child_process");
+
+/***/ }),
+
 /***/ 7598:
 /***/ ((module) => {
 
@@ -31445,6 +31570,22 @@ module.exports = require("node:crypto");
 
 "use strict";
 module.exports = require("node:events");
+
+/***/ }),
+
+/***/ 3024:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("node:fs");
+
+/***/ }),
+
+/***/ 6760:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("node:path");
 
 /***/ }),
 

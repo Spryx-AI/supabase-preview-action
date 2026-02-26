@@ -17,13 +17,25 @@ inputs:
     required: false
     default: ''
   timeout_seconds:
-    description: 'Timeout in seconds waiting for branch migrations to complete (default: 300)'
+    description: 'Timeout in seconds waiting for preview branch provisioning to complete (default: 300)'
     required: false
     default: '300'
   poll_interval_seconds:
     description: 'Polling interval in seconds while waiting for branch (default: 10)'
     required: false
     default: '10'
+  apply_local_migrations:
+    description: 'If true, runs `supabase migration up` using local `supabase/migrations` against the preview branch'
+    required: false
+    default: 'true'
+  supabase_workdir:
+    description: 'Path to the repo directory that contains `supabase/` (used only when apply_local_migrations=true)'
+    required: false
+    default: '.'
+  supabase_cli_version:
+    description: 'Supabase CLI version to install via npx when apply_local_migrations=true (example: 2.67.1 or latest)'
+    required: false
+    default: 'latest'
 
 outputs:
   project_ref:

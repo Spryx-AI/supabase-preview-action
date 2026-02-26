@@ -2,6 +2,8 @@
 
 GitHub Action that creates a [Supabase preview branch](https://supabase.com/docs/guides/platform/branching) for a pull request and exposes its credentials as reusable outputs.
 
+Optionally, it can also apply your repository's local `supabase/migrations` to the preview branch using the Supabase CLI (`supabase migration up`).
+
 ## Inputs
 
 | Input | Required | Default | Description |
@@ -10,8 +12,11 @@ GitHub Action that creates a [Supabase preview branch](https://supabase.com/docs
 | `project_ref` | ✅ | — | Parent Supabase project reference ID |
 | `git_branch_name` | | current git ref | Git branch name used to identify the preview branch |
 | `branch_name` | | `git_branch_name` | Supabase branch name (defaults to `git_branch_name`) |
-| `timeout_seconds` | | `300` | Max seconds to wait for branch migrations to complete |
+| `timeout_seconds` | | `300` | Max seconds to wait for preview branch provisioning to complete |
 | `poll_interval_seconds` | | `10` | Polling interval in seconds while waiting for branch |
+| `apply_local_migrations` | | `true` | Run `supabase migration up` using local `supabase/migrations` against the preview branch |
+| `supabase_workdir` | | `.` | Repo directory that contains `supabase/` (used only when `apply_local_migrations=true`) |
+| `supabase_cli_version` | | `latest` | Supabase CLI version installed via `npx` when `apply_local_migrations=true` |
 
 ## Outputs
 
@@ -55,11 +60,44 @@ The action sets these **non-sensitive** environment variables for all subsequent
     supabase_access_token: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
     project_ref: ${{ vars.SUPABASE_PROJECT_REF }}
 
-- name: Run database migration
+- name: Test database connection
   # Pass db_connection_string explicitly — it contains the password and is not auto-exported
   env:
     DATABASE_URL: ${{ steps.preview.outputs.db_connection_string }}
   run: psql "$DATABASE_URL" -c "SELECT 1"
+```
+
+### Apply local `supabase/migrations` automatically (Supabase CLI)
+
+This action **does apply** your repo migrations by default (`apply_local_migrations: true`).
+Run `actions/checkout` first and make sure the repository contains `supabase/migrations`.
+If you want to disable this behavior, set `apply_local_migrations: false`.
+
+```yaml
+- uses: actions/checkout@v4
+
+- uses: Spryx-AI/supabase-preview-action@v1
+  id: preview
+  with:
+    supabase_access_token: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+    project_ref: ${{ vars.SUPABASE_PROJECT_REF }}
+    # Enabled by default; shown here explicitly
+    apply_local_migrations: true
+    # Optional when your supabase/ folder is not at repo root:
+    # supabase_workdir: ./apps/api
+    # Optional pin:
+    # supabase_cli_version: 2.67.1
+```
+
+Disable local migrations:
+
+```yaml
+- uses: Spryx-AI/supabase-preview-action@v1
+  id: preview
+  with:
+    supabase_access_token: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+    project_ref: ${{ vars.SUPABASE_PROJECT_REF }}
+    apply_local_migrations: false
 ```
 
 ### Basic — create preview branch on pull requests
