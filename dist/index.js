@@ -31200,30 +31200,114 @@ function getBooleanInput(name) {
 function buildEncodedDbConnectionString(user, password, host, port, dbName) {
     return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${dbName}`;
 }
-function runSupabaseCliDbPush(workdir, cliVersion, dbConnectionString) {
-    const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+function redactCliArgs(args) {
+    const redacted = [];
+    for (let i = 0; i < args.length; i++) {
+        redacted.push(args[i]);
+        if (args[i] === '--db-url' && i + 1 < args.length) {
+            redacted.push('<redacted-db-url>');
+            i++;
+        }
+    }
+    return redacted;
+}
+function formatCliCommand(spec) {
+    return [spec.cmd, ...redactCliArgs(spec.args)].join(' ');
+}
+function getSupabaseCliCandidates(workdir, cliVersion, dbConnectionString) {
     const cliPackage = `supabase@${cliVersion || 'latest'}`;
-    const args = [
+    const isWindows = process.platform === 'win32';
+    const npxCmd = isWindows ? 'npx.cmd' : 'npx';
+    const npmCmd = isWindows ? 'npm.cmd' : 'npm';
+    const nodeBinDir = (0, node_path_1.dirname)(process.execPath);
+    const bundledNpx = (0, node_path_1.resolve)(nodeBinDir, npxCmd);
+    const bundledNpm = (0, node_path_1.resolve)(nodeBinDir, npmCmd);
+    const supabaseArgs = ['--workdir', workdir, 'db', 'push', '--yes', '--db-url', dbConnectionString];
+    const npxArgs = [
         '--yes',
         cliPackage,
         '--workdir',
         workdir,
-        '--yes',
         'db',
         'push',
+        '--yes',
         '--db-url',
         dbConnectionString,
     ];
+    const npmExecArgs = [
+        'exec',
+        '--yes',
+        cliPackage,
+        '--',
+        '--workdir',
+        workdir,
+        'db',
+        'push',
+        '--yes',
+        '--db-url',
+        dbConnectionString,
+    ];
+    return [
+        { label: 'supabase (PATH)', cmd: 'supabase', args: supabaseArgs },
+        { label: 'npx (PATH)', cmd: npxCmd, args: npxArgs },
+        { label: 'npm exec (PATH)', cmd: npmCmd, args: npmExecArgs },
+        { label: 'npx (bundled with Node runtime)', cmd: bundledNpx, args: npxArgs },
+        { label: 'npm exec (bundled with Node runtime)', cmd: bundledNpm, args: npmExecArgs },
+    ];
+}
+function runCliCommandOrThrow(spec) {
+    const result = (0, node_child_process_1.spawnSync)(spec.cmd, spec.args, {
+        stdio: 'inherit',
+        env: process.env,
+    });
+    if (result.error) {
+        const errno = result.error;
+        if (errno.code === 'ENOENT') {
+            return {
+                ok: false,
+                notFound: true,
+                detail: `${spec.label}: command not found (${spec.cmd})`,
+            };
+        }
+        throw new Error(`Failed to start ${spec.label}. ` +
+            `Command: ${formatCliCommand(spec)}. ` +
+            `Error: ${errno.code ?? errno.name}: ${errno.message}`);
+    }
+    if (typeof result.status === 'number' && result.status !== 0) {
+        throw new Error(`Supabase CLI command failed (exit code ${result.status}). ` +
+            `Launcher: ${spec.label}. ` +
+            `Command: ${formatCliCommand(spec)}`);
+    }
+    if (result.signal) {
+        throw new Error(`Supabase CLI command was terminated by signal ${result.signal}. ` +
+            `Launcher: ${spec.label}. ` +
+            `Command: ${formatCliCommand(spec)}`);
+    }
+    return { ok: true };
+}
+function runSupabaseCliDbPush(workdir, cliVersion, dbConnectionString) {
+    const cliPackage = `supabase@${cliVersion || 'latest'}`;
     core.info(`Applying local Supabase migrations via CLI db push (${cliPackage})...`);
     core.info(`Supabase CLI workdir: ${workdir}`);
-    try {
-        (0, node_child_process_1.execFileSync)(npxCmd, args, { stdio: 'inherit' });
+    const attempts = getSupabaseCliCandidates(workdir, cliVersion, dbConnectionString);
+    const notFoundDetails = [];
+    for (const attempt of attempts) {
+        core.info(`Trying Supabase CLI launcher: ${attempt.label}`);
+        const result = runCliCommandOrThrow(attempt);
+        if (result.ok) {
+            core.info(`Supabase CLI launcher selected: ${attempt.label}`);
+            return;
+        }
+        notFoundDetails.push(result.detail);
     }
-    catch (error) {
-        throw new Error(`Supabase CLI db push failed while applying local migrations. ` +
-            `Ensure the repository is checked out and contains a valid supabase project. ` +
-            `Original error: ${error instanceof Error ? error.message : String(error)}`);
-    }
+    const pathValue = process.env.PATH || '(empty)';
+    throw new Error(`Supabase CLI db push failed while applying local migrations. ` +
+        `None of the supported launchers were found (${attempts.length} attempts). ` +
+        `Tried: ${notFoundDetails.join('; ')}. ` +
+        `Node runtime: ${process.execPath}. ` +
+        `PATH: ${pathValue}. ` +
+        `Ensure the runner has either \`supabase\`, \`npx\`, or \`npm\` available, ` +
+        `or set \`apply_local_migrations: false\`.`);
 }
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
