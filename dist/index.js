@@ -31260,9 +31260,16 @@ function getSupabaseCliCandidates(workdir, cliVersion, dbConnectionString) {
 }
 function runCliCommandOrThrow(spec) {
     const result = (0, node_child_process_1.spawnSync)(spec.cmd, spec.args, {
-        stdio: 'inherit',
+        // Capture stdout/stderr so we can re-emit them via core.info/core.error,
+        // which ensures output appears in the Actions log on self-hosted runners.
+        stdio: ['inherit', 'pipe', 'pipe'],
         env: process.env,
+        encoding: 'utf8',
     });
+    if (result.stdout)
+        core.info(result.stdout);
+    if (result.stderr)
+        core.info(result.stderr);
     if (result.error) {
         const errno = result.error;
         if (errno.code === 'ENOENT') {
