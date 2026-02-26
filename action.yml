@@ -25,7 +25,7 @@ inputs:
     required: false
     default: '10'
   apply_local_migrations:
-    description: 'If true, runs `supabase migration up` using local `supabase/migrations` against the preview branch'
+    description: 'If true, runs `supabase db push --db-url` using local `supabase/migrations` against the preview branch'
     required: false
     default: 'true'
   supabase_workdir:

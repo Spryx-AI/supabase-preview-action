@@ -31200,7 +31200,7 @@ function getBooleanInput(name) {
 function buildEncodedDbConnectionString(user, password, host, port, dbName) {
     return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${dbName}`;
 }
-function runSupabaseCliMigrations(workdir, cliVersion, dbConnectionString) {
+function runSupabaseCliDbPush(workdir, cliVersion, dbConnectionString) {
     const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
     const cliPackage = `supabase@${cliVersion || 'latest'}`;
     const args = [
@@ -31209,18 +31209,18 @@ function runSupabaseCliMigrations(workdir, cliVersion, dbConnectionString) {
         '--workdir',
         workdir,
         '--yes',
-        'migration',
-        'up',
+        'db',
+        'push',
         '--db-url',
         dbConnectionString,
     ];
-    core.info(`Applying local Supabase migrations via CLI (${cliPackage})...`);
+    core.info(`Applying local Supabase migrations via CLI db push (${cliPackage})...`);
     core.info(`Supabase CLI workdir: ${workdir}`);
     try {
         (0, node_child_process_1.execFileSync)(npxCmd, args, { stdio: 'inherit' });
     }
     catch (error) {
-        throw new Error(`Supabase CLI failed while applying local migrations. ` +
+        throw new Error(`Supabase CLI db push failed while applying local migrations. ` +
             `Ensure the repository is checked out and contains a valid supabase project. ` +
             `Original error: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -31396,7 +31396,7 @@ async function run() {
         core.setSecret(dbPass);
     if (dbPass)
         core.setSecret(encodeURIComponent(dbPass));
-    // 10. Optionally apply local repository migrations via Supabase CLI.
+    // 10. Optionally apply local repository migrations via Supabase CLI (`db push`).
     // This requires `actions/checkout` and a `supabase/` directory in the workspace.
     if (applyLocalMigrations) {
         if (!dbPass) {
@@ -31412,7 +31412,7 @@ async function run() {
         if (!(0, node_fs_1.existsSync)(migrationsDir)) {
             throw new Error(`apply_local_migrations=true but no migrations directory was found at: ${migrationsDir}`);
         }
-        runSupabaseCliMigrations(resolvedWorkdir, supabaseCliVersion, encodedDbConnectionString);
+        runSupabaseCliDbPush(resolvedWorkdir, supabaseCliVersion, encodedDbConnectionString);
     }
     // 11. Set GitHub Actions outputs
     core.setOutput('project_ref', branchProjectRef);

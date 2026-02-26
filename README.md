@@ -2,7 +2,7 @@
 
 GitHub Action that creates a [Supabase preview branch](https://supabase.com/docs/guides/platform/branching) for a pull request and exposes its credentials as reusable outputs.
 
-Optionally, it can also apply your repository's local `supabase/migrations` to the preview branch using the Supabase CLI (`supabase migration up`).
+Optionally, it can also apply your repository's local `supabase/migrations` to the preview branch using the Supabase CLI (`supabase db push --db-url ...`).
 
 ## Inputs
 
@@ -14,7 +14,7 @@ Optionally, it can also apply your repository's local `supabase/migrations` to t
 | `branch_name` | | `git_branch_name` | Supabase branch name (defaults to `git_branch_name`) |
 | `timeout_seconds` | | `300` | Max seconds to wait for preview branch provisioning to complete |
 | `poll_interval_seconds` | | `10` | Polling interval in seconds while waiting for branch |
-| `apply_local_migrations` | | `true` | Run `supabase migration up` using local `supabase/migrations` against the preview branch |
+| `apply_local_migrations` | | `true` | Run `supabase db push --db-url ...` using local `supabase/migrations` against the preview branch |
 | `supabase_workdir` | | `.` | Repo directory that contains `supabase/` (used only when `apply_local_migrations=true`) |
 | `supabase_cli_version` | | `latest` | Supabase CLI version installed via `npx` when `apply_local_migrations=true` |
 
@@ -67,9 +67,9 @@ The action sets these **non-sensitive** environment variables for all subsequent
   run: psql "$DATABASE_URL" -c "SELECT 1"
 ```
 
-### Apply local `supabase/migrations` automatically (Supabase CLI)
+### Apply local `supabase/migrations` automatically (Supabase CLI `db push`)
 
-This action **does apply** your repo migrations by default (`apply_local_migrations: true`).
+This action **does apply** your repo migrations by default (`apply_local_migrations: true`) using `supabase db push --db-url`.
 Run `actions/checkout` first and make sure the repository contains `supabase/migrations`.
 If you want to disable this behavior, set `apply_local_migrations: false`.
 
@@ -99,6 +99,8 @@ Disable local migrations:
     project_ref: ${{ vars.SUPABASE_PROJECT_REF }}
     apply_local_migrations: false
 ```
+
+Because `db push` runs on every action execution (including when the preview branch already exists), new migrations are applied on subsequent CI runs whenever there are changes.
 
 ### Basic — create preview branch on pull requests
 

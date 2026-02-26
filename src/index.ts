@@ -86,7 +86,7 @@ function buildEncodedDbConnectionString(
   return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${dbName}`
 }
 
-function runSupabaseCliMigrations(
+function runSupabaseCliDbPush(
   workdir: string,
   cliVersion: string,
   dbConnectionString: string
@@ -99,20 +99,20 @@ function runSupabaseCliMigrations(
     '--workdir',
     workdir,
     '--yes',
-    'migration',
-    'up',
+    'db',
+    'push',
     '--db-url',
     dbConnectionString,
   ]
 
-  core.info(`Applying local Supabase migrations via CLI (${cliPackage})...`)
+  core.info(`Applying local Supabase migrations via CLI db push (${cliPackage})...`)
   core.info(`Supabase CLI workdir: ${workdir}`)
 
   try {
     execFileSync(npxCmd, args, { stdio: 'inherit' })
   } catch (error) {
     throw new Error(
-      `Supabase CLI failed while applying local migrations. ` +
+      `Supabase CLI db push failed while applying local migrations. ` +
         `Ensure the repository is checked out and contains a valid supabase project. ` +
         `Original error: ${error instanceof Error ? error.message : String(error)}`
     )
@@ -349,7 +349,7 @@ async function run(): Promise<void> {
   if (dbPass) core.setSecret(dbPass)
   if (dbPass) core.setSecret(encodeURIComponent(dbPass))
 
-  // 10. Optionally apply local repository migrations via Supabase CLI.
+  // 10. Optionally apply local repository migrations via Supabase CLI (`db push`).
   // This requires `actions/checkout` and a `supabase/` directory in the workspace.
   if (applyLocalMigrations) {
     if (!dbPass) {
@@ -375,7 +375,7 @@ async function run(): Promise<void> {
       )
     }
 
-    runSupabaseCliMigrations(resolvedWorkdir, supabaseCliVersion, encodedDbConnectionString)
+    runSupabaseCliDbPush(resolvedWorkdir, supabaseCliVersion, encodedDbConnectionString)
   }
 
   // 11. Set GitHub Actions outputs
