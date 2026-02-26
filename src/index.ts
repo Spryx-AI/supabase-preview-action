@@ -43,6 +43,12 @@ interface CliCommandSpec {
   label: string
   cmd: string
   args: string[]
+  /**
+   * When true, a non-zero exit code is treated as a launcher failure (e.g. npm
+   * postinstall failed to download the binary) rather than a supabase CLI
+   * error, so the next candidate is tried instead of aborting.
+   */
+  isDownloader?: boolean
 }
 
 class RequestTimeoutError extends Error {
@@ -162,12 +168,14 @@ function getSupabaseCliCandidates(
 
   candidates.push(
     { label: 'supabase (PATH)', cmd: 'supabase', args: supabaseArgs },
-    { label: 'npx (PATH)', cmd: npxCmd, args: npxArgs },
-    { label: 'npm exec (PATH)', cmd: npmCmd, args: npmExecArgs },
+    // npx/npm downloaders: treat any non-zero exit as a launcher failure so the
+    // next candidate (including the curl fallback) is tried.
+    { label: 'npx (PATH)', cmd: npxCmd, args: npxArgs, isDownloader: true },
+    { label: 'npm exec (PATH)', cmd: npmCmd, args: npmExecArgs, isDownloader: true },
     // Run bundled scripts explicitly via the Node binary to avoid shebang
     // picking up an incompatible system Node version.
-    { label: 'npx (bundled with Node runtime)', cmd: nodeBin, args: [bundledNpx, ...npxArgs] },
-    { label: 'npm exec (bundled with Node runtime)', cmd: nodeBin, args: [bundledNpm, ...npmExecArgs] },
+    { label: 'npx (bundled with Node runtime)', cmd: nodeBin, args: [bundledNpx, ...npxArgs], isDownloader: true },
+    { label: 'npm exec (bundled with Node runtime)', cmd: nodeBin, args: [bundledNpm, ...npmExecArgs], isDownloader: true },
   )
 
   return candidates
@@ -197,6 +205,14 @@ function runCliCommandOrThrow(spec: CliCommandSpec): { ok: true } | { ok: false;
       }
     }
 
+    if (spec.isDownloader) {
+      return {
+        ok: false,
+        notFound: true,
+        detail: `${spec.label}: failed to start (${errno.code ?? errno.name}: ${errno.message})`,
+      }
+    }
+
     throw new Error(
       `Failed to start ${spec.label}. ` +
         `Command: ${formatCliCommand(spec)}. ` +
@@ -205,6 +221,16 @@ function runCliCommandOrThrow(spec: CliCommandSpec): { ok: true } | { ok: false;
   }
 
   if (typeof result.status === 'number' && result.status !== 0) {
+    if (spec.isDownloader) {
+      // Non-zero exit from an npx/npm launcher means the package manager itself
+      // failed (e.g. postinstall couldn't download the native binary). Treat it
+      // as a launcher failure so the next candidate (e.g. curl) is tried.
+      return {
+        ok: false,
+        notFound: true,
+        detail: `${spec.label}: launcher failed with exit code ${result.status} (postinstall may have failed to download the binary)`,
+      }
+    }
     throw new Error(
       `Supabase CLI command failed (exit code ${result.status}). ` +
         `Launcher: ${spec.label}. ` +
