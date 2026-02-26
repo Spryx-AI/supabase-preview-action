@@ -31219,7 +31219,8 @@ function getSupabaseCliCandidates(workdir, cliVersion, dbConnectionString) {
     const isWindows = process.platform === 'win32';
     const npxCmd = isWindows ? 'npx.cmd' : 'npx';
     const npmCmd = isWindows ? 'npm.cmd' : 'npm';
-    const nodeBinDir = (0, node_path_1.dirname)(process.execPath);
+    const nodeBin = process.execPath;
+    const nodeBinDir = (0, node_path_1.dirname)(nodeBin);
     const bundledNpx = (0, node_path_1.resolve)(nodeBinDir, npxCmd);
     const bundledNpm = (0, node_path_1.resolve)(nodeBinDir, npmCmd);
     const supabaseArgs = ['--workdir', workdir, 'db', 'push', '--yes', '--db-url', dbConnectionString];
@@ -31251,8 +31252,10 @@ function getSupabaseCliCandidates(workdir, cliVersion, dbConnectionString) {
         { label: 'supabase (PATH)', cmd: 'supabase', args: supabaseArgs },
         { label: 'npx (PATH)', cmd: npxCmd, args: npxArgs },
         { label: 'npm exec (PATH)', cmd: npmCmd, args: npmExecArgs },
-        { label: 'npx (bundled with Node runtime)', cmd: bundledNpx, args: npxArgs },
-        { label: 'npm exec (bundled with Node runtime)', cmd: bundledNpm, args: npmExecArgs },
+        // Run bundled scripts explicitly via the Node binary to avoid shebang
+        // picking up an incompatible system Node version.
+        { label: 'npx (bundled with Node runtime)', cmd: nodeBin, args: [bundledNpx, ...npxArgs] },
+        { label: 'npm exec (bundled with Node runtime)', cmd: nodeBin, args: [bundledNpm, ...npmExecArgs] },
     ];
 }
 function runCliCommandOrThrow(spec) {
