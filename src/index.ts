@@ -2,8 +2,9 @@ import * as core from '@actions/core'
 import * as github from '@actions/github'
 import { SupabaseManagementAPI } from 'supabase-management-js'
 import { spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { chmodSync, existsSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
 
 const SUPABASE_API_BASE = 'https://api.supabase.com'
 const READY_STATUS = 'ACTIVE_HEALTHY'
@@ -222,6 +223,81 @@ function runCliCommandOrThrow(spec: CliCommandSpec): { ok: true } | { ok: false;
   return { ok: true }
 }
 
+/**
+ * Downloads the Supabase CLI binary directly from GitHub Releases using curl + tar.
+ * Returns the path to the extracted binary, or null if download is not possible.
+ */
+function downloadSupabaseBinaryViaCurl(cliVersion: string): string | null {
+  const archMap: Record<string, string> = { x64: 'amd64', arm64: 'arm64' }
+  const platformMap: Record<string, string> = { linux: 'linux', darwin: 'darwin', win32: 'windows' }
+
+  const supabaseArch = archMap[process.arch]
+  const supabasePlatform = platformMap[process.platform]
+
+  if (!supabaseArch || !supabasePlatform) {
+    core.info(`Direct binary download not supported for platform ${process.platform}/${process.arch}`)
+    return null
+  }
+
+  const filename = `supabase_${supabasePlatform}_${supabaseArch}.tar.gz`
+  const version = cliVersion && cliVersion !== 'latest' ? `v${cliVersion.replace(/^v/, '')}` : null
+  const url = version
+    ? `https://github.com/supabase/cli/releases/download/${version}/${filename}`
+    : `https://github.com/supabase/cli/releases/latest/download/${filename}`
+
+  core.info(`Downloading Supabase CLI binary: ${url}`)
+
+  // Download via curl (follows redirects, fails on HTTP errors)
+  const curlResult = spawnSync('curl', ['-fsSL', url], {
+    stdio: ['inherit', 'pipe', 'pipe'],
+    encoding: 'buffer',
+    maxBuffer: 100 * 1024 * 1024, // 100 MB
+  })
+
+  if (curlResult.error) {
+    const errno = curlResult.error as NodeJS.ErrnoException
+    if (errno.code === 'ENOENT') {
+      core.info('curl not found, skipping direct binary download')
+    } else {
+      core.info(`curl error: ${errno.message}`)
+    }
+    return null
+  }
+
+  if (typeof curlResult.status === 'number' && curlResult.status !== 0) {
+    core.info(`curl failed (exit ${curlResult.status}): ${curlResult.stderr?.toString().trim() || '(no output)'}`)
+    return null
+  }
+
+  // Extract the binary to a temp dir
+  const tmpDir = mkdtempSync(join(tmpdir(), 'supabase-cli-'))
+  const tarResult = spawnSync('tar', ['-xz', '-C', tmpDir], {
+    input: curlResult.stdout,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    encoding: 'buffer',
+  })
+
+  if (tarResult.error || (typeof tarResult.status === 'number' && tarResult.status !== 0)) {
+    core.info(`tar extraction failed: ${tarResult.stderr?.toString().trim() || tarResult.error?.message || '(no output)'}`)
+    return null
+  }
+
+  const binaryName = process.platform === 'win32' ? 'supabase.exe' : 'supabase'
+  const binaryPath = join(tmpDir, binaryName)
+
+  if (!existsSync(binaryPath)) {
+    core.info(`Supabase binary not found at ${binaryPath} after extraction`)
+    return null
+  }
+
+  if (process.platform !== 'win32') {
+    chmodSync(binaryPath, 0o755)
+  }
+
+  core.info(`Supabase CLI binary extracted to ${binaryPath}`)
+  return binaryPath
+}
+
 function runSupabaseCliDbPush(
   workdir: string,
   cliVersion: string,
@@ -248,10 +324,28 @@ function runSupabaseCliDbPush(
     notFoundDetails.push(result.detail)
   }
 
+  // All npx/npm/PATH candidates failed — try downloading the binary directly via curl
+  if (!supabaseCliPath) {
+    core.info('Trying Supabase CLI launcher: curl (direct binary download from GitHub Releases)')
+    const supabaseArgs = ['--workdir', workdir, 'db', 'push', '--yes', '--db-url', dbConnectionString]
+    const downloadedBin = downloadSupabaseBinaryViaCurl(cliVersion)
+    if (downloadedBin) {
+      const spec: CliCommandSpec = { label: 'curl (direct binary download)', cmd: downloadedBin, args: supabaseArgs }
+      const result = runCliCommandOrThrow(spec)
+      if (result.ok) {
+        core.info('Supabase CLI launcher selected: curl (direct binary download)')
+        return
+      }
+      notFoundDetails.push(result.detail)
+    } else {
+      notFoundDetails.push('curl (direct binary download): download failed or curl/tar not available')
+    }
+  }
+
   const pathValue = process.env.PATH || '(empty)'
   throw new Error(
     `Supabase CLI db push failed while applying local migrations. ` +
-      `None of the supported launchers were found (${attempts.length} attempts). ` +
+      `None of the supported launchers were found (${attempts.length + 1} attempts). ` +
       `Tried: ${notFoundDetails.join('; ')}. ` +
       `Node runtime: ${process.execPath}. ` +
       `PATH: ${pathValue}. ` +
