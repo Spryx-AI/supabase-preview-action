@@ -113,7 +113,8 @@ function formatCliCommand(spec: CliCommandSpec): string {
 function getSupabaseCliCandidates(
   workdir: string,
   cliVersion: string,
-  dbConnectionString: string
+  dbConnectionString: string,
+  supabaseCliPath: string
 ): CliCommandSpec[] {
   const cliPackage = `supabase@${cliVersion || 'latest'}`
   const isWindows = process.platform === 'win32'
@@ -150,7 +151,15 @@ function getSupabaseCliCandidates(
     dbConnectionString,
   ]
 
-  return [
+  const candidates: CliCommandSpec[] = []
+
+  // If user explicitly specified a binary path, try it first and skip npm/npx downloads.
+  if (supabaseCliPath) {
+    candidates.push({ label: `supabase (supabase_cli_path: ${supabaseCliPath})`, cmd: supabaseCliPath, args: supabaseArgs })
+    return candidates
+  }
+
+  candidates.push(
     { label: 'supabase (PATH)', cmd: 'supabase', args: supabaseArgs },
     { label: 'npx (PATH)', cmd: npxCmd, args: npxArgs },
     { label: 'npm exec (PATH)', cmd: npmCmd, args: npmExecArgs },
@@ -158,7 +167,9 @@ function getSupabaseCliCandidates(
     // picking up an incompatible system Node version.
     { label: 'npx (bundled with Node runtime)', cmd: nodeBin, args: [bundledNpx, ...npxArgs] },
     { label: 'npm exec (bundled with Node runtime)', cmd: nodeBin, args: [bundledNpm, ...npmExecArgs] },
-  ]
+  )
+
+  return candidates
 }
 
 function runCliCommandOrThrow(spec: CliCommandSpec): { ok: true } | { ok: false; notFound: true; detail: string } {
@@ -214,7 +225,8 @@ function runCliCommandOrThrow(spec: CliCommandSpec): { ok: true } | { ok: false;
 function runSupabaseCliDbPush(
   workdir: string,
   cliVersion: string,
-  dbConnectionString: string
+  dbConnectionString: string,
+  supabaseCliPath: string
 ): void {
   const cliPackage = `supabase@${cliVersion || 'latest'}`
 
@@ -223,7 +235,7 @@ function runSupabaseCliDbPush(
   core.info(`Runner platform: ${process.platform}/${process.arch}, Node: ${process.version}, execPath: ${process.execPath}`)
   core.info(`PATH: ${process.env.PATH ?? '(empty)'}`)
 
-  const attempts = getSupabaseCliCandidates(workdir, cliVersion, dbConnectionString)
+  const attempts = getSupabaseCliCandidates(workdir, cliVersion, dbConnectionString, supabaseCliPath)
   const notFoundDetails: string[] = []
 
   for (const attempt of attempts) {
@@ -243,8 +255,10 @@ function runSupabaseCliDbPush(
       `Tried: ${notFoundDetails.join('; ')}. ` +
       `Node runtime: ${process.execPath}. ` +
       `PATH: ${pathValue}. ` +
-      `Ensure the runner has either \`supabase\`, \`npx\`, or \`npm\` available, ` +
-      `or set \`apply_local_migrations: false\`.`
+      `Tip: on self-hosted runners where GitHub Releases are blocked, ` +
+      `install the Supabase CLI manually and set \`supabase_cli_path\` to its absolute path ` +
+      `(e.g. supabase_cli_path: /usr/local/bin/supabase). ` +
+      `Alternatively set \`apply_local_migrations: false\` to skip this step.`
   )
 }
 
@@ -348,6 +362,7 @@ async function run(): Promise<void> {
   const applyLocalMigrations = getBooleanInput('apply_local_migrations')
   const supabaseWorkdir = core.getInput('supabase_workdir') || '.'
   const supabaseCliVersion = core.getInput('supabase_cli_version') || 'latest'
+  const supabaseCliPath = core.getInput('supabase_cli_path') || ''
   const timeoutMs = timeoutSeconds * 1000
   const pollMs = pollIntervalSeconds * 1000
 
@@ -504,7 +519,7 @@ async function run(): Promise<void> {
       )
     }
 
-    runSupabaseCliDbPush(resolvedWorkdir, supabaseCliVersion, encodedDbConnectionString)
+    runSupabaseCliDbPush(resolvedWorkdir, supabaseCliVersion, encodedDbConnectionString, supabaseCliPath)
   }
 
   // 11. Set GitHub Actions outputs

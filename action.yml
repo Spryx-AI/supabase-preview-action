@@ -36,6 +36,10 @@ inputs:
     description: 'Supabase CLI version to install via npx when apply_local_migrations=true (example: 2.67.1 or latest)'
     required: false
     default: 'latest'
+  supabase_cli_path:
+    description: 'Absolute path to a pre-installed supabase binary (e.g. /usr/local/bin/supabase). When set, skips npx/npm download entirely — useful on self-hosted runners where GitHub Releases are blocked.'
+    required: false
+    default: ''
 
 outputs:
   project_ref:

@@ -31214,7 +31214,7 @@ function redactCliArgs(args) {
 function formatCliCommand(spec) {
     return [spec.cmd, ...redactCliArgs(spec.args)].join(' ');
 }
-function getSupabaseCliCandidates(workdir, cliVersion, dbConnectionString) {
+function getSupabaseCliCandidates(workdir, cliVersion, dbConnectionString, supabaseCliPath) {
     const cliPackage = `supabase@${cliVersion || 'latest'}`;
     const isWindows = process.platform === 'win32';
     const npxCmd = isWindows ? 'npx.cmd' : 'npx';
@@ -31248,15 +31248,17 @@ function getSupabaseCliCandidates(workdir, cliVersion, dbConnectionString) {
         '--db-url',
         dbConnectionString,
     ];
-    return [
-        { label: 'supabase (PATH)', cmd: 'supabase', args: supabaseArgs },
-        { label: 'npx (PATH)', cmd: npxCmd, args: npxArgs },
-        { label: 'npm exec (PATH)', cmd: npmCmd, args: npmExecArgs },
-        // Run bundled scripts explicitly via the Node binary to avoid shebang
-        // picking up an incompatible system Node version.
-        { label: 'npx (bundled with Node runtime)', cmd: nodeBin, args: [bundledNpx, ...npxArgs] },
-        { label: 'npm exec (bundled with Node runtime)', cmd: nodeBin, args: [bundledNpm, ...npmExecArgs] },
-    ];
+    const candidates = [];
+    // If user explicitly specified a binary path, try it first and skip npm/npx downloads.
+    if (supabaseCliPath) {
+        candidates.push({ label: `supabase (supabase_cli_path: ${supabaseCliPath})`, cmd: supabaseCliPath, args: supabaseArgs });
+        return candidates;
+    }
+    candidates.push({ label: 'supabase (PATH)', cmd: 'supabase', args: supabaseArgs }, { label: 'npx (PATH)', cmd: npxCmd, args: npxArgs }, { label: 'npm exec (PATH)', cmd: npmCmd, args: npmExecArgs }, 
+    // Run bundled scripts explicitly via the Node binary to avoid shebang
+    // picking up an incompatible system Node version.
+    { label: 'npx (bundled with Node runtime)', cmd: nodeBin, args: [bundledNpx, ...npxArgs] }, { label: 'npm exec (bundled with Node runtime)', cmd: nodeBin, args: [bundledNpm, ...npmExecArgs] });
+    return candidates;
 }
 function runCliCommandOrThrow(spec) {
     const result = (0, node_child_process_1.spawnSync)(spec.cmd, spec.args, {
@@ -31297,13 +31299,13 @@ function runCliCommandOrThrow(spec) {
     }
     return { ok: true };
 }
-function runSupabaseCliDbPush(workdir, cliVersion, dbConnectionString) {
+function runSupabaseCliDbPush(workdir, cliVersion, dbConnectionString, supabaseCliPath) {
     const cliPackage = `supabase@${cliVersion || 'latest'}`;
     core.info(`Applying local Supabase migrations via CLI db push (${cliPackage})...`);
     core.info(`Supabase CLI workdir: ${workdir}`);
     core.info(`Runner platform: ${process.platform}/${process.arch}, Node: ${process.version}, execPath: ${process.execPath}`);
     core.info(`PATH: ${process.env.PATH ?? '(empty)'}`);
-    const attempts = getSupabaseCliCandidates(workdir, cliVersion, dbConnectionString);
+    const attempts = getSupabaseCliCandidates(workdir, cliVersion, dbConnectionString, supabaseCliPath);
     const notFoundDetails = [];
     for (const attempt of attempts) {
         core.info(`Trying Supabase CLI launcher: ${attempt.label}`);
@@ -31320,8 +31322,10 @@ function runSupabaseCliDbPush(workdir, cliVersion, dbConnectionString) {
         `Tried: ${notFoundDetails.join('; ')}. ` +
         `Node runtime: ${process.execPath}. ` +
         `PATH: ${pathValue}. ` +
-        `Ensure the runner has either \`supabase\`, \`npx\`, or \`npm\` available, ` +
-        `or set \`apply_local_migrations: false\`.`);
+        `Tip: on self-hosted runners where GitHub Releases are blocked, ` +
+        `install the Supabase CLI manually and set \`supabase_cli_path\` to its absolute path ` +
+        `(e.g. supabase_cli_path: /usr/local/bin/supabase). ` +
+        `Alternatively set \`apply_local_migrations: false\` to skip this step.`);
 }
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -31400,6 +31404,7 @@ async function run() {
     const applyLocalMigrations = getBooleanInput('apply_local_migrations');
     const supabaseWorkdir = core.getInput('supabase_workdir') || '.';
     const supabaseCliVersion = core.getInput('supabase_cli_version') || 'latest';
+    const supabaseCliPath = core.getInput('supabase_cli_path') || '';
     const timeoutMs = timeoutSeconds * 1000;
     const pollMs = pollIntervalSeconds * 1000;
     // 2. Resolve git branch name: explicit input → GitHub Actions context → error
@@ -31510,7 +31515,7 @@ async function run() {
         if (!(0, node_fs_1.existsSync)(migrationsDir)) {
             throw new Error(`apply_local_migrations=true but no migrations directory was found at: ${migrationsDir}`);
         }
-        runSupabaseCliDbPush(resolvedWorkdir, supabaseCliVersion, encodedDbConnectionString);
+        runSupabaseCliDbPush(resolvedWorkdir, supabaseCliVersion, encodedDbConnectionString, supabaseCliPath);
     }
     // 11. Set GitHub Actions outputs
     core.setOutput('project_ref', branchProjectRef);
