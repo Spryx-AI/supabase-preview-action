@@ -31263,8 +31263,10 @@ function runCliCommandOrThrow(spec) {
         // Capture stdout/stderr so we can re-emit them via core.info/core.error,
         // which ensures output appears in the Actions log on self-hosted runners.
         stdio: ['inherit', 'pipe', 'pipe'],
-        env: process.env,
+        // Enable verbose npm logging to surface download/install failures.
+        env: { ...process.env, NPM_CONFIG_LOGLEVEL: 'verbose' },
         encoding: 'utf8',
+        maxBuffer: 10 * 1024 * 1024, // 10 MB
     });
     if (result.stdout)
         core.info(result.stdout);
@@ -31299,6 +31301,8 @@ function runSupabaseCliDbPush(workdir, cliVersion, dbConnectionString) {
     const cliPackage = `supabase@${cliVersion || 'latest'}`;
     core.info(`Applying local Supabase migrations via CLI db push (${cliPackage})...`);
     core.info(`Supabase CLI workdir: ${workdir}`);
+    core.info(`Runner platform: ${process.platform}/${process.arch}, Node: ${process.version}, execPath: ${process.execPath}`);
+    core.info(`PATH: ${process.env.PATH ?? '(empty)'}`);
     const attempts = getSupabaseCliCandidates(workdir, cliVersion, dbConnectionString);
     const notFoundDetails = [];
     for (const attempt of attempts) {
