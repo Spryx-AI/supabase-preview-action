@@ -24,6 +24,10 @@ inputs:
     description: 'Polling interval in seconds while waiting for branch (default: 10)'
     required: false
     default: '10'
+  include_seed:
+    description: 'Run `supabase db push --include-seed` after the branch is ready. Requires the Supabase CLI to be installed on the runner.'
+    required: false
+    default: 'false'
 
 outputs:
   project_ref:

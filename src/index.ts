@@ -1,3 +1,4 @@
+import { execFileSync } from 'child_process'
 import * as core from '@actions/core'
 import * as github from '@actions/github'
 import { SupabaseManagementAPI } from 'supabase-management-js'
@@ -103,6 +104,7 @@ async function run(): Promise<void> {
   const parentRef = core.getInput('project_ref', { required: true })
   const timeoutSeconds = parseInt(core.getInput('timeout_seconds') || '300', 10)
   const pollIntervalSeconds = parseInt(core.getInput('poll_interval_seconds') || '10', 10)
+  const includeSeed = core.getInput('include_seed') === 'true'
   const timeoutMs = timeoutSeconds * 1000
   const pollMs = pollIntervalSeconds * 1000
 
@@ -215,12 +217,22 @@ async function run(): Promise<void> {
   const dbName = 'postgres'
   const dbConnectionString = `postgresql://${poolerUser}:${dbPass}@${poolerHost}:${poolerPort}/${dbName}`
 
-  // 9. Mask secrets BEFORE any logging or output
+  // 9. Optionally run supabase db push --include-seed against the preview branch
+  if (includeSeed) {
+    core.info('Running supabase db push --include-seed...')
+    execFileSync('supabase', ['db', 'push', '--include-seed', '--db-url', dbConnectionString], {
+      stdio: 'inherit',
+      env: { ...process.env, SUPABASE_ACCESS_TOKEN: accessToken },
+    })
+    core.info('supabase db push --include-seed completed successfully.')
+  }
+
+  // 10. Mask secrets BEFORE any logging or output
   if (anonKey) core.setSecret(anonKey)
   if (serviceRoleKey) core.setSecret(serviceRoleKey)
   if (dbPass) core.setSecret(dbPass)
 
-  // 10. Set GitHub Actions outputs
+  // 11. Set GitHub Actions outputs
   core.setOutput('project_ref', branchProjectRef)
   core.setOutput('supabase_url', supabaseUrl)
   core.setOutput('anon_key', anonKey)
@@ -234,7 +246,7 @@ async function run(): Promise<void> {
   core.setOutput('db_pooler_port', poolerPort)
   core.setOutput('db_connection_string', dbConnectionString)
 
-  // 11. Export non-sensitive env vars for convenient use in subsequent steps.
+  // 12. Export non-sensitive env vars for convenient use in subsequent steps.
   // Sensitive credentials (SUPABASE_SERVICE_ROLE_KEY, PGPASSWORD) are intentionally
   // NOT exported globally — pass them via step-level `env:` from the action outputs.
   core.exportVariable('SUPABASE_URL', supabaseUrl)
