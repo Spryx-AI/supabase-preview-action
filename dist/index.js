@@ -30021,13 +30021,26 @@ async function resolveSupabaseCLI() {
 async function waitForCheck(octokit, owner, repo, ref, checkName, timeoutMs, pollMs) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-        const { data } = await octokit.rest.checks.listForRef({
-            owner,
-            repo,
-            ref,
-            check_name: checkName,
-            filter: 'latest',
-        });
+        let data;
+        try {
+            const res = await octokit.rest.checks.listForRef({
+                owner,
+                repo,
+                ref,
+                check_name: checkName,
+                filter: 'latest',
+            });
+            data = res.data;
+        }
+        catch (err) {
+            if (err instanceof Error && 'status' in err && err.status === 403) {
+                throw new Error('GitHub API returned 403 when listing check runs. ' +
+                    'The workflow must grant the `checks: read` permission:\n\n' +
+                    '  permissions:\n' +
+                    '    checks: read');
+            }
+            throw err;
+        }
         if (data.check_runs.length > 0) {
             const run = data.check_runs[0];
             if (run.status === 'completed') {

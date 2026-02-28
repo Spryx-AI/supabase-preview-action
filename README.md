@@ -8,10 +8,13 @@ GitHub Action that creates a [Supabase preview branch](https://supabase.com/docs
 |-------|----------|---------|-------------|
 | `supabase_access_token` | ✅ | — | Supabase Management API access token |
 | `project_ref` | ✅ | — | Parent Supabase project reference ID |
+| `github_token` | ✅ | — | GitHub token with `checks: read` permission (use `secrets.GITHUB_TOKEN`) |
 | `git_branch_name` | | current git ref | Git branch name used to identify the preview branch |
 | `branch_name` | | `git_branch_name` | Supabase branch name (defaults to `git_branch_name`) |
+| `check_name` | | `Supabase Preview` | Name of the GitHub check to wait for |
 | `timeout_seconds` | | `300` | Max seconds to wait for branch migrations to complete |
 | `poll_interval_seconds` | | `10` | Polling interval in seconds while waiting for branch |
+| `include_seed` | | `false` | Run `supabase db push --include-seed` after the branch is ready |
 
 ## Outputs
 
@@ -46,12 +49,19 @@ The action sets these **non-sensitive** environment variables for all subsequent
 
 ## Usage
 
+> **Required permissions:** The `github_token` must have `checks: read` access. Add the following to your workflow job:
+> ```yaml
+> permissions:
+>   checks: read
+> ```
+
 ### Connect to the database with psql
 
 ```yaml
 - uses: Spryx-AI/supabase-preview-action@v1
   id: preview
   with:
+    github_token: ${{ secrets.GITHUB_TOKEN }}
     supabase_access_token: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
     project_ref: ${{ vars.SUPABASE_PROJECT_REF }}
 
@@ -71,12 +81,15 @@ on:
 jobs:
   preview:
     runs-on: ubuntu-latest
+    permissions:
+      checks: read
     steps:
       - uses: actions/checkout@v4
 
       - uses: Spryx-AI/supabase-preview-action@v1
         id: preview
         with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           supabase_access_token: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           project_ref: ${{ vars.SUPABASE_PROJECT_REF }}
 
@@ -92,6 +105,7 @@ jobs:
 - uses: Spryx-AI/supabase-preview-action@v1
   id: preview
   with:
+    github_token: ${{ secrets.GITHUB_TOKEN }}
     supabase_access_token: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
     project_ref: ${{ vars.SUPABASE_PROJECT_REF }}
 
@@ -108,6 +122,7 @@ jobs:
 - uses: Spryx-AI/supabase-preview-action@v1
   id: preview
   with:
+    github_token: ${{ secrets.GITHUB_TOKEN }}
     supabase_access_token: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
     project_ref: ${{ vars.SUPABASE_PROJECT_REF }}
 
@@ -128,6 +143,7 @@ After the action runs, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `PGHOST`, `PGPORT`, 
 - uses: Spryx-AI/supabase-preview-action@v1
   id: preview
   with:
+    github_token: ${{ secrets.GITHUB_TOKEN }}
     supabase_access_token: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
     project_ref: ${{ vars.SUPABASE_PROJECT_REF }}
 
@@ -145,6 +161,7 @@ After the action runs, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `PGHOST`, `PGPORT`, 
 - uses: Spryx-AI/supabase-preview-action@v1
   id: preview
   with:
+    github_token: ${{ secrets.GITHUB_TOKEN }}
     supabase_access_token: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
     project_ref: ${{ vars.SUPABASE_PROJECT_REF }}
     git_branch_name: ${{ github.head_ref }}

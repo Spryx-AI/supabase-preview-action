@@ -79,13 +79,27 @@ async function waitForCheck(
   const deadline = Date.now() + timeoutMs
 
   while (Date.now() < deadline) {
-    const { data } = await octokit.rest.checks.listForRef({
-      owner,
-      repo,
-      ref,
-      check_name: checkName,
-      filter: 'latest',
-    })
+    let data: Awaited<ReturnType<typeof octokit.rest.checks.listForRef>>['data']
+    try {
+      const res = await octokit.rest.checks.listForRef({
+        owner,
+        repo,
+        ref,
+        check_name: checkName,
+        filter: 'latest',
+      })
+      data = res.data
+    } catch (err: unknown) {
+      if (err instanceof Error && 'status' in err && (err as { status: number }).status === 403) {
+        throw new Error(
+          'GitHub API returned 403 when listing check runs. ' +
+            'The workflow must grant the `checks: read` permission:\n\n' +
+            '  permissions:\n' +
+            '    checks: read'
+        )
+      }
+      throw err
+    }
 
     if (data.check_runs.length > 0) {
       const run = data.check_runs[0]

@@ -9,7 +9,7 @@ inputs:
     description: 'Parent Supabase project reference ID'
     required: true
   github_token:
-    description: 'GitHub token used to poll the Supabase Preview check status'
+    description: 'GitHub token used to poll the Supabase Preview check status. Requires `checks: read` permission.'
     required: true
   check_name:
     description: 'Name of the GitHub check to wait for (default: "Supabase Preview")'
