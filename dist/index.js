@@ -31342,11 +31342,14 @@ async function run() {
     const dbPortStr = String(dbPort || 5432);
     const dbName = 'postgres';
     const dbConnectionString = `postgresql://${poolerUser}:${dbPass}@${poolerHost}:${poolerPort}/${dbName}`;
-    // 9. Optionally run supabase db push --include-seed against the preview branch
+    // 9. Optionally run supabase db push --include-seed against the preview branch.
+    // Uses the direct DB connection (not the pooler) because Supavisor does not register
+    // preview branch tenants — only the parent project has pooler support.
     if (includeSeed) {
         const supabaseBin = await resolveSupabaseCLI();
+        const directDbUrl = `postgresql://${dbUser}:${dbPass}@${dbHost}:${dbPortStr}/${dbName}`;
         core.info('Running supabase db push --include-seed...');
-        (0, child_process_1.execFileSync)(supabaseBin, ['db', 'push', '--include-seed', '--db-url', dbConnectionString], {
+        (0, child_process_1.execFileSync)(supabaseBin, ['db', 'push', '--include-seed', '--db-url', directDbUrl], {
             stdio: 'inherit',
             env: { ...process.env, SUPABASE_ACCESS_TOKEN: accessToken },
         });
