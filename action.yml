@@ -1,5 +1,5 @@
 name: 'Supabase Preview Action'
-description: 'Creates a Supabase preview branch and exposes credentials as reusable outputs'
+description: 'Waits for the Supabase Preview check and exposes branch credentials as outputs'
 
 inputs:
   supabase_access_token:
@@ -8,24 +8,31 @@ inputs:
   project_ref:
     description: 'Parent Supabase project reference ID'
     required: true
+  github_token:
+    description: 'GitHub token used to poll the Supabase Preview check status'
+    required: true
+  check_name:
+    description: 'Name of the GitHub check to wait for (default: "Supabase Preview")'
+    required: false
+    default: 'Supabase Preview'
   git_branch_name:
     description: 'Git branch name used to identify the preview branch (defaults to current GitHub ref)'
     required: false
     default: ''
   branch_name:
-    description: 'Supabase branch name (defaults to git_branch_name)'
+    description: 'Supabase branch name passed to `branches get` (defaults to git_branch_name)'
     required: false
     default: ''
   timeout_seconds:
-    description: 'Timeout in seconds waiting for branch migrations to complete (default: 300)'
+    description: 'Timeout in seconds waiting for the Supabase Preview check (default: 300)'
     required: false
     default: '300'
   poll_interval_seconds:
-    description: 'Polling interval in seconds while waiting for branch (default: 10)'
+    description: 'Polling interval in seconds while waiting for the check (default: 10)'
     required: false
     default: '10'
   include_seed:
-    description: 'Run `supabase db push --include-seed` after the branch is ready. Requires the Supabase CLI to be installed on the runner.'
+    description: 'Run `supabase db push --include-seed` after the branch is ready'
     required: false
     default: 'false'
 
@@ -48,12 +55,8 @@ outputs:
     description: 'PostgreSQL user for the preview branch'
   db_password:
     description: 'PostgreSQL password for the preview branch (masked in logs)'
-  db_pooler_host:
-    description: 'Supavisor pooler host — supports IPv4, use this on GitHub Actions runners'
-  db_pooler_port:
-    description: 'Supavisor pooler port (6543 transaction mode)'
   db_connection_string:
-    description: 'Full PostgreSQL connection string via the IPv4-compatible pooler'
+    description: 'Full PostgreSQL connection string (if provided by the CLI output)'
 
 runs:
   using: 'node20'
