@@ -31153,6 +31153,9 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 const child_process_1 = __nccwpck_require__(5317);
+const fs = __importStar(__nccwpck_require__(9896));
+const os = __importStar(__nccwpck_require__(857));
+const path = __importStar(__nccwpck_require__(6928));
 const core = __importStar(__nccwpck_require__(7484));
 const github = __importStar(__nccwpck_require__(3228));
 const supabase_management_js_1 = __nccwpck_require__(5507);
@@ -31200,6 +31203,54 @@ async function waitForBranch(client, branchId, timeoutMs, pollMs) {
         await sleep(pollMs);
     }
     throw new Error(`Timed out after ${timeoutMs / 1000}s waiting for branch to become active`);
+}
+// Resolves a path to the supabase CLI binary.
+// Uses the system binary if available; otherwise downloads the latest release.
+async function resolveSupabaseCLI() {
+    try {
+        (0, child_process_1.execFileSync)('supabase', ['--version'], { stdio: 'pipe' });
+        return 'supabase';
+    }
+    catch {
+        // not in PATH — download it
+    }
+    core.info('Supabase CLI not found in PATH — downloading latest release...');
+    const platform = os.platform();
+    const arch = os.arch();
+    const platformMap = {
+        linux: 'linux',
+        darwin: 'darwin',
+        win32: 'windows',
+    };
+    const archMap = {
+        x64: 'amd64',
+        arm64: 'arm64',
+    };
+    const osPlatform = platformMap[platform];
+    const osArch = archMap[arch];
+    if (!osPlatform || !osArch) {
+        throw new Error(`Unsupported platform for auto-download: ${platform}/${arch}`);
+    }
+    const releaseRes = await fetch('https://api.github.com/repos/supabase/cli/releases/latest');
+    if (!releaseRes.ok)
+        throw new Error(`Failed to fetch Supabase CLI release info: ${releaseRes.status}`);
+    const release = (await releaseRes.json());
+    const version = release.tag_name;
+    const tarName = `supabase_${osPlatform}_${osArch}.tar.gz`;
+    const downloadUrl = `https://github.com/supabase/cli/releases/download/${version}/${tarName}`;
+    core.info(`Downloading Supabase CLI ${version} for ${osPlatform}/${osArch}...`);
+    const dlRes = await fetch(downloadUrl);
+    if (!dlRes.ok)
+        throw new Error(`Failed to download Supabase CLI: ${dlRes.status}`);
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'supabase-cli-'));
+    const tarPath = path.join(tmpDir, tarName);
+    fs.writeFileSync(tarPath, Buffer.from(await dlRes.arrayBuffer()));
+    (0, child_process_1.execFileSync)('tar', ['-xzf', tarPath, '-C', tmpDir], { stdio: 'pipe' });
+    const binaryPath = path.join(tmpDir, platform === 'win32' ? 'supabase.exe' : 'supabase');
+    if (platform !== 'win32')
+        fs.chmodSync(binaryPath, 0o755);
+    core.info(`Supabase CLI ${version} ready.`);
+    return binaryPath;
 }
 async function run() {
     // 1. Read inputs
@@ -31293,8 +31344,9 @@ async function run() {
     const dbConnectionString = `postgresql://${poolerUser}:${dbPass}@${poolerHost}:${poolerPort}/${dbName}`;
     // 9. Optionally run supabase db push --include-seed against the preview branch
     if (includeSeed) {
+        const supabaseBin = await resolveSupabaseCLI();
         core.info('Running supabase db push --include-seed...');
-        (0, child_process_1.execFileSync)('supabase', ['db', 'push', '--include-seed', '--db-url', dbConnectionString], {
+        (0, child_process_1.execFileSync)(supabaseBin, ['db', 'push', '--include-seed', '--db-url', dbConnectionString], {
             stdio: 'inherit',
             env: { ...process.env, SUPABASE_ACCESS_TOKEN: accessToken },
         });
