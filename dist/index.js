@@ -31282,7 +31282,7 @@ async function run() {
         core.warning('service_role key not found in API keys response');
     // 7. Fetch branch project region to build the pooler (IPv4) connection string
     // Direct connections (db_host) are IPv6-only; the Supavisor pooler supports IPv4
-    const branchProject = await supabaseFetch('GET', `/v1/projects/${branchProjectRef}`, accessToken);
+    const branchProject = await supabaseFetch('GET', `/v1/projects/${parentRef}`, accessToken);
     const poolerHost = `aws-0-${branchProject.region}.pooler.supabase.com`;
     const poolerPort = '6543'; // transaction mode
     const poolerUser = `postgres.${branchProjectRef}`;

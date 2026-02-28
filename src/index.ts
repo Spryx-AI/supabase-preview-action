@@ -204,7 +204,7 @@ async function run(): Promise<void> {
   // Direct connections (db_host) are IPv6-only; the Supavisor pooler supports IPv4
   const branchProject = await supabaseFetch<ProjectDetails>(
     'GET',
-    `/v1/projects/${branchProjectRef}`,
+    `/v1/projects/${parentRef}`,
     accessToken
   )
   const poolerHost = `aws-0-${branchProject.region}.pooler.supabase.com`
